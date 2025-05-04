@@ -1,5 +1,5 @@
 const express = require('express');
-const { jobDetails, jobFilters, masterFilters, createJob, updateJob, AdminJobListing } = require('../controllers/jobController');
+const { jobDetails, jobFilters, masterFilters, categoryFilters, createJob, updateJob, AdminJobListing } = require('../controllers/jobController');
 const { isAuthenticatedUser, authorizeRoles } = require('../middlewares/user_actions/auth');
 const router = express.Router();
 const { uploadJob } = require('../middlewares/helpers/multer');
@@ -8,6 +8,7 @@ const { handleMulterError } = require('../middlewares/helpers/multer');
 router.route('/job_details').post(jobDetails)
 router.route('/job_filters').get(isAuthenticatedUser, authorizeRoles(5,2,1), jobFilters)
 router.route('/master_filters').get(isAuthenticatedUser, authorizeRoles(5,2,1), masterFilters)
+router.route('/category_filters').get(categoryFilters)
 
 // Admin create jobs
 router.route('/create-job')

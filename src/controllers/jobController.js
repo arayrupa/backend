@@ -564,3 +564,48 @@ exports.masterFilters = asyncErrorHandler(async (req, res, next) => {
     });
   }
 });
+
+exports.categoryFilters = asyncErrorHandler(async (req, res, next) => {
+  console.log("categoryFilters API called");
+
+  try {
+    // Fetch all active industries
+    const industries = await IndustryMaster.find({ status: 1 }).sort({ industry_name: 1 });
+
+    // Map each industry to its formatted structure with vacancy count
+    const industryList = await Promise.all(
+      industries.map(async (industry) => {
+        const vacancies = await JobListing.countDocuments({
+          industry_id: industry._id,
+          status: 1,
+        });
+
+        return {
+          value: industry._id,
+          label: industry.industry_name,
+          vacancies,
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'categoryFilters fetched successfully',
+      data: {
+        industries: {
+          count: industryList.length,
+          industryList,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error in categoryFilters:", error);
+    return res.status(500).json({
+      success: false,
+      message: "There was an error in fetching job listings.",
+      error: error.message || error,
+    });
+  }
+});
+
+
