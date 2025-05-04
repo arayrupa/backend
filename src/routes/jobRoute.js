@@ -5,7 +5,7 @@ const router = express.Router();
 const { uploadJob } = require('../middlewares/helpers/multer');
 const { handleMulterError } = require('../middlewares/helpers/multer');
 
-router.route('/job_details').post(isAuthenticatedUser, authorizeRoles(5,2,1), jobDetails)
+router.route('/job_details').post(jobDetails)
 router.route('/job_filters').get(isAuthenticatedUser, authorizeRoles(5,2,1), jobFilters)
 router.route('/master_filters').get(isAuthenticatedUser, authorizeRoles(5,2,1), masterFilters)
 

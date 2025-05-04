@@ -317,23 +317,13 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
 exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
   console.log("jobDetails API called")
   try {
-    const { id } = req.body;
+    const { id } = req?.body?.params;
     if (!id) {
       return res.status(500).json({
         success: false,
         message: "Job ID is required.",
       });
     }
-
-    // Fetch status IDs
-    const [jobShortListId, jobSelectedListId, interviewList, jobAppliedListId] = await Promise.all([
-      JobappliedStatusMaster.findOne({ jobapplied_status_masterid: 3 }).lean(),
-      JobappliedStatusMaster.findOne({ jobapplied_status_masterid: 11 }).lean(),
-      JobappliedStatusMaster.find({ jobapplied_status_masterid: { $in: [6, 8, 17] } }).lean(),
-      JobappliedStatusMaster.findOne({ jobapplied_status_masterid: 1 }).lean(),
-    ]);
-
-    const interviewListIds = interviewList.map((interview) => interview._id);
 
     const jobListRaw = await JobListing.findById(id).lean();
     if (!jobListRaw) {
@@ -344,11 +334,6 @@ exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
     }
 
     const companyDetails = await CompanyDetails.findOne({ user_id: jobListRaw.user_id }).lean();
-    const jobIncentive = await JobIncentives.findOne({
-      _id: jobListRaw.job_incentive_id,
-      inc_type: 3,
-      status: 1,
-    }).lean();
 
     const [jobRole, state, cities, skills, member, industry, education, funcCategory, createdBy] = await Promise.all([
       JobRole.findById(jobListRaw.job_role).lean(),
@@ -362,23 +347,6 @@ exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
       User.findById(jobListRaw.createdBy).lean(),
     ]);
 
-    const appliedCount = await JobApplied.countDocuments({
-      job_id: jobListRaw._id,
-      job_applied_status: jobAppliedListId?._id,
-    });
-    const shortlistingCount = await JobApplied.countDocuments({
-      job_id: jobListRaw._id,
-      job_applied_status: jobShortListId?._id,
-    });
-    const interviewCount = await JobApplied.countDocuments({
-      job_id: jobListRaw._id,
-      job_applied_status: { $in: interviewListIds },
-    });
-    const selectedCount = await JobApplied.countDocuments({
-      job_id: jobListRaw._id,
-      job_applied_status: jobSelectedListId?._id,
-    });
-
     const jobDetails = {
       _id: jobListRaw._id,
       company_name: companyDetails?.company_name || "",
@@ -386,8 +354,6 @@ exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
       company_address: companyDetails?.address || "",
       company_website: companyDetails?.website || "",
       job_no: jobListRaw.job_no || "",
-      retention: jobIncentive?.retention || 0,
-      hiring_amount: jobIncentive?.amount?.toString() || "",
       job_role: jobRole?.name || "",
       title: jobRole?.name || "",
       job_desc: jobListRaw?.job_desc || "",
@@ -395,13 +361,9 @@ exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
       hunter_status: jobListRaw.hunter_status == 0 ? "Inactive" : "Active",
       job_type: jobListRaw.job_type == 0 ? "Default" : jobListRaw.job_type == 1 ? "Trending" : "Hot",
       position_close: jobListRaw.position_close == 0 ? "Open" : "Closed",
-      applied: appliedCount,
-      shortlisting: shortlistingCount,
-      interview: interviewCount,
-      selected: selectedCount,
       state: state?.state_name || "",
-      cities: cities.map((city) => city.city_name) || [],
-      skill: skills.map((skill) => skill.name) || [],
+      cities: cities.map((city) => ({ label: city.city_name, value: city._id })) || [],
+      skill: skills.map((skill) => ({ label: skill.name, value: skill._id })) || [],
       member: member?.name || "",
       min_exp: jobListRaw.min_exp?.toString() || "",
       max_exp: jobListRaw.max_exp?.toString() || "",
@@ -515,12 +477,6 @@ exports.jobFilters = asyncErrorHandler(async (req, res, next) => {
         const educations = await Education.find({ _id: { $in: educationIds }, status: 1 }).sort({ name: 1 }).lean();
         return educations.map(education => ({ value: education?._id, label: education?.name }));
       })(),
-      JobappliedStatusMaster.find({ status: 1 }).sort({ name: 1 }).then(appliedStatus =>
-        appliedStatus.map(appliedStatus => ({ value: appliedStatus._id, label: appliedStatus.name }))
-      ),
-      UserManagement.find({ user_id: req.user._id }).select('assign_user_id').populate({ path: 'assign_user_id', select: '_id name' }).then(teams =>
-        teams.map(team => ({ value: team.assign_user_id._id, label: team.assign_user_id.name }))
-      )
     ]);
 
     return res.status(200).json({
@@ -537,8 +493,6 @@ exports.jobFilters = asyncErrorHandler(async (req, res, next) => {
         skills: { count: skillsList.length, skillsList },
         functions: { count: functionsList.length, functionsList },
         education: { count: educationList.length, educationList },
-        applied_Status: { count: JobappliedStatusList.length, Job_Applied_StatusList: JobappliedStatusList },
-        myTeams: { count: myTeamsListJob.length, myTeamsList:myTeamsListJob },
       },
     });
   } catch (error) {
