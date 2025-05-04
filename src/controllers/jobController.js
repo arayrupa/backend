@@ -144,23 +144,25 @@ exports.updateJob = asyncErrorHandler(async (req, res, next) => {
 exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
   console.log("AdminJobListing API called");
   try {
-    const { company, industry, jobRole, cities, rpa, min_salary, max_salary, trending, search, page=1, member_id, limit = 20 } = req.body;
+    const { mode_work, company, industry, jobRole, cities, rpa, min_salary, max_salary, trending, search, page=1, member_id, limit = 10 } = req.body.params;
     // Calculate skip value for pagination
     const skip = (page - 1) * limit;
 
     let matchStage = {}
-    if (req.user.user_type == 1) {
-      matchStage = {}
-    } else {
-      const assignedUser = await UserManagement.find({ user_id: req.user._id })
-        .select('assign_user_id')
-        .populate({ path: 'assign_user_id', select: '_id' })
-      matchStage = assignedUser.length > 0 ? { member_id: { $in: assignedUser.map(user => mongoose.Types.ObjectId(user.assign_user_id._id.toString())) } } : {  }
-    }
+    // if (req?.user?.user_type == 1) {
+    //   matchStage = {}
+    // } else {
+    //   const assignedUser = await UserManagement.find({ user_id: req.user._id })
+    //     .select('assign_user_id')
+    //     .populate({ path: 'assign_user_id', select: '_id' })
+    //   matchStage = assignedUser.length > 0 ? { member_id: { $in: assignedUser.map(user => mongoose.Types.ObjectId(user.assign_user_id._id.toString())) } } : {  }
+    // }
     const parsedMinSalary = parseFloat(min_salary);
     const parsedMaxSalary = parseFloat(max_salary);
+ 
     // Filters
     const filters = [
+      mode_work &&  { "mode_work": { $eq: mode_work } },
       company && { "companyDetails._id": { $in: company.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
       industry && { "industry_id": { $in: industry.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
       jobRole && { "job_role": { $in: jobRole.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
