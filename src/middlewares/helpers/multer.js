@@ -24,7 +24,7 @@ const storageResume = multer.diskStorage({
     destination: (req, file, cb) => {
         // Use absolute path from project root
         const uploadsDir = path.join(__dirname,'../..', '/public/uploads/resume');
-        console.log("file", file)
+        console.log("fileaaa", file)
         // Create the directory if it doesn't exist
         if (!fs.existsSync(uploadsDir)) {
             fs.mkdirSync(uploadsDir, { recursive: true });
@@ -129,19 +129,6 @@ const uploadCompanyLogo = multer({
 }).single('logo')
 
 
-const uploadJob = multer({
-    storage: storageResume,
-    fileFilter: jobFilter,
-    limits: {
-        fileSize: 10* 1024 * 1024 // 10MB limit
-    }
-})
-.fields([
-    { name: 'resume', maxCount: 1 }, // Allow up to 1 resume file
-    { name: 'audio_1', maxCount: 1 },
-    { name: 'audio_2', maxCount: 1 }
-]);
-
 const uploadResume = multer({
     storage: storageResume,
     fileFilter: resumeFilter,
@@ -149,6 +136,7 @@ const uploadResume = multer({
         fileSize: 10* 1024 * 1024 // 10MB limit
     }
 }).single('resume');
+
 
 
 // Global error handler for multer
@@ -169,6 +157,5 @@ module.exports = {
     uploadHowToSource,
     uploadCompanyLogo,
     uploadResume,
-    uploadJob,
     handleMulterError
 };

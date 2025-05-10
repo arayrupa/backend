@@ -103,6 +103,9 @@ const userSchema = new mongoose.Schema({
     resume: {
         type: String
     },
+    applied_url: {
+        type: String
+    },
     job_no: {
         type: String
     },

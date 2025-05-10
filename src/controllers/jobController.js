@@ -14,12 +14,12 @@ const {formatDate} = require("../middlewares/helpers/formatDate");
 
 // createJob api
 exports.createJob = asyncErrorHandler(async (req, res, next) => {
-  console.log("createJob API called");
+  console.log("createJob API called",req?.files?.resume)
   try {
     const requiredFields = [
-      "companies", "job_role", "edu_id", "vacancy", "min_exp", "max_exp",
+      "company", "applied_url","job_role", "edu_id", "vacancy", "min_exp", "max_exp",
       "min_ctc", "max_ctc", "age", "notice_period", "industry_id", "mode_work",
-      "func_category_id", "city_id", "skill",
+      "func_category", "cities", "skill",
       "job_desc"
     ];
 
@@ -30,26 +30,24 @@ exports.createJob = asyncErrorHandler(async (req, res, next) => {
     }
 
     // Fetch company details
-    const companyData = await CompanyDetails.findById(req.body.companies);
+    const companyData = await CompanyDetails.findById(req.body.company);
     if (!companyData) {
       return res.status(500).json({ message: "Company not found" });
     }
     let resumeUrl = '';
-    console.log("req.files", req.files); // Log the entire files object
     if(req.files && req.files.resume && req.files.resume.length > 0) {
-      console.log("Resume file found");
-      console.log("Resume file details:", req.files.resume[0]);
       resumeUrl = req.files.resume[0].path; // Use path instead of location
     }
 
-
+    console.log("resumeUrl",resumeUrl)
     // Construct Job Data
     const jobData = {
       ...req.body,
       user_id:companyData.user_id,
       resume: resumeUrl,
+      applied_url: req.body.applied_url,
       createdBy: req.user._id,
-      city_id: req.body.city_id ? req.body.city_id.split(",") : [],
+      city_id: req.body.cities ? req.body.cities.split(",") : [],
       skill: req.body.skill ? req.body.skill.split(",") : []
     };
 
@@ -93,38 +91,20 @@ exports.updateJob = asyncErrorHandler(async (req, res, next) => {
     const jobData = {
       ...req.body,
       user_id: companyData.user_id,
-      city_id: req.body.city_id ? req.body.city_id.split(",") : [],
+      city_id: req.body.cities ? req.body.cities.split(",") : [],
       skill: req.body.skill ? req.body.skill.split(",") : []
     };
     // Upload files to S3 (if provided)
     const uploadFile = async (file, path) => file ? uploadToS3(file[0], path) : "";
-    const [resumeUrl, audio1Url, audio2Url] = await Promise.all([
+    const [resumeUrl] = await Promise.all([
       uploadFile(req.files?.resume, "uploadedfiles"),
-      uploadFile(req.files?.audio_1, "job_audio"),
-      uploadFile(req.files?.audio_2, "job_audio")
     ]);
     jobData.resume = resumeUrl || job.resume;
-    jobData.audio_1 = audio1Url || job.audio_1;
-    jobData.audio_2 = audio2Url || job.audio_2;
+    jobData.applied_url = req.body.applied_url;
     
     // Update job listing
     const updatedJob = await JobListing.findByIdAndUpdate(id, jobData, { new: true });
     
-    // Delete cached job listings from Redis
-    if (redisClient) {
-      try {
-        const keys = await redisClient.keys("jobs-page-admin-*");
-        if (keys.length > 0) {
-          await Promise.all(keys.map(key => redisClient.del(key)));
-          console.log("Deleted cached jobs list:", keys);
-        }
-      } catch (redisError) {
-        console.error("Redis Cache Delete Error:", redisError);
-      }
-    }
-    if(req.body.whatappSend){
-      // await jobUpdatesendWhatsApp(user.mobile, user.name);
-    }
     return res.status(200).json({
       success: true,
       message: "Job updated successfully",
@@ -144,19 +124,14 @@ exports.updateJob = asyncErrorHandler(async (req, res, next) => {
 exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
   console.log("AdminJobListing API called");
   try {
-    const { mode_work, company, industry, jobRole, cities, rpa, min_salary, max_salary, trending, search, page=1, member_id, limit = 10 } = req.body.params;
+    const { type, mode_work, company, industry, jobRole, cities, rpa, min_salary, max_salary, trending, search, page=1, member_id, limit = 10 } = req.body.params;
     // Calculate skip value for pagination
     const skip = (page - 1) * limit;
 
-    let matchStage = {}
-    // if (req?.user?.user_type == 1) {
-    //   matchStage = {}
-    // } else {
-    //   const assignedUser = await UserManagement.find({ user_id: req.user._id })
-    //     .select('assign_user_id')
-    //     .populate({ path: 'assign_user_id', select: '_id' })
-    //   matchStage = assignedUser.length > 0 ? { member_id: { $in: assignedUser.map(user => mongoose.Types.ObjectId(user.assign_user_id._id.toString())) } } : {  }
-    // }
+    let matchStage = {status: { $in: [1] }}
+    if(type){
+      matchStage = { status: { $in: [0, 1] } }
+    }
     const parsedMinSalary = parseFloat(min_salary);
     const parsedMaxSalary = parseFloat(max_salary);
  
@@ -237,16 +212,16 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
             _id: job._id,
             company_name: job?.companyDetails?.company_name || '',
             company_logo: job?.companyDetails?.logo || '',
-            company_id: job?.companyDetails?._id || '',
+            company: {value: job?.companyDetails?._id, label: job?.companyDetails?.company_name} || '',
             jobIncentivesData: job?.jobIncentivesData || '',
             retention: job?.jobIncentivesData?.retention ? job?.jobIncentivesData?.retention : "",
             hirring_amount: job?.jobIncentivesData?.amount ? job?.jobIncentivesData?.amount?.toString() : '',
             job_role: job_role? {label: job_role?.name, value: job_role?._id} : '',
             title: job_role? {label: job_role?.name, value: job_role?._id} : '',
-            status: job.status === 0 ? 'Inactive' : job.status === 1 ? 'Active' : 'Deleted or Expired',
-            hunter_status: job.hunter_status == 0 ? 'Inactive' : 'Active',
-            job_type: job.job_type == 0 ? 'Default' : job.job_type == 1 ? 'Trending' : 'Hot',
-            position_close: job.position_close == 0 ? 'Open' : 'Closed',
+            status: job.status,
+            hunter_status: job.hunter_status,
+            job_type: job.job_type,
+            position_close: job.position_close,
             cities: job.city_id
               ? (await Cities.find({ _id: { $in: job.city_id } }))
               .map(city => ({ label: city.city_name, value: city._id }))
@@ -265,13 +240,14 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
             max_ctc: job.max_ctc?.toString() || '',
             member_id: job.member_id?.toString() || '',
             job_desc: job.job_desc || '',
-            mode_work: job.mode_work || '',
+            mode_work: {label: job.mode_work, value: job.mode_work},
             industry_id: industry ? {label: industry.industry_name, value: industry._id} : '',
             education: education ? {label: education.name, value: education._id} : '',
-            func_category: func_category ? {label: func_category.func_category_name, value: func_category._id} : '',
+            func_category_id: func_category ? {label: func_category.func_category_name, value: func_category._id} : '',
             age: job.age || '',
             notice_period: job.notice_period || '',
             resume: job.resume || '',
+            applied_url: job.applied_url || '',
             audio_1: job.audio_1 || '',
             audio_2: job.audio_2 || '',
             expired_date: formatDate(job.expired_date) || '',
@@ -357,6 +333,7 @@ exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
       job_role: jobRole?.name || "",
       title: jobRole?.name || "",
       job_desc: jobListRaw?.job_desc || "",
+      applied_url: jobListRaw?.applied_url || "",
       status: jobListRaw.status === 0 ? "Inactive" : jobListRaw.status === 1 ? "Active" : "Deleted or Expired",
       hunter_status: jobListRaw.hunter_status == 0 ? "Inactive" : "Active",
       job_type: jobListRaw.job_type == 0 ? "Default" : jobListRaw.job_type == 1 ? "Trending" : "Hot",
@@ -608,4 +585,30 @@ exports.categoryFilters = asyncErrorHandler(async (req, res, next) => {
   }
 });
 
-
+// activeInactiveJob apis
+exports.activeInactiveJob = asyncErrorHandler(async (req, res, next) => {
+    console.log("activeInactiveJob API called");
+    try {
+        const { id } = req.params;
+        const job = await JobListing.findById(id);
+        if (!job) {
+            return res.status(500).json({
+                success: false,
+                message: "Job not found"
+            });
+        }
+        job.status = req.body.status;
+        await job.save();
+        return res.status(200).json({
+            success: true,
+            message: "Job status updated successfully"
+        });
+    } catch (error) {
+        console.error("Error updating job status:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message
+        });
+    }
+});
