@@ -16,6 +16,5 @@ router.route('/create-job')
 router.route('/update-job/:id')
     .put(uploadResume, isAuthenticatedUser, authorizeRoles(2,1), updateJob, handleMulterError)
 router.route('/admin_job_listing').post(AdminJobListing)
-
 router.route('/active-inactive-job/:id').post(isAuthenticatedUser, authorizeRoles(2,1), activeInactiveJob)
 module.exports = router;

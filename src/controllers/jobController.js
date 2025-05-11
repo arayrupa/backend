@@ -124,7 +124,7 @@ exports.updateJob = asyncErrorHandler(async (req, res, next) => {
 exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
   console.log("AdminJobListing API called");
   try {
-    const { type, mode_work, company, industry, jobRole, cities, rpa, min_salary, max_salary, trending, search, page=1, member_id, limit = 10 } = req.body.params;
+    const { type, mode_work, company, industry, jobRole, cities, min_salary, max_salary, trending, search, page=1, limit = 10 } = req.body.params;
     // Calculate skip value for pagination
     const skip = (page - 1) * limit;
 
@@ -132,8 +132,8 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
     if(type){
       matchStage = { status: { $in: [0, 1] } }
     }
-    const parsedMinSalary = parseFloat(min_salary);
-    const parsedMaxSalary = parseFloat(max_salary);
+    const parsedMinSalary = parseFloat(min_salary)
+    const parsedMaxSalary = parseFloat(max_salary)
  
     // Filters
     const filters = [
@@ -145,8 +145,6 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
       trending && { "job_type": { $eq: parseFloat(trending) } },
       min_salary && { "min_ctc": { $gte: parsedMinSalary } },
       max_salary && { "max_ctc": { $lte: parsedMaxSalary } },
-      member_id && { "member_id": { $in: member_id.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
-      rpa && { "jobIncentivesData.retention": { $in: rpa.split(',').map(id => id.trim()) } },
       search && {
         $or: [
           { "companyDetails.company_name": { $regex: search, $options: "i" } }, // Case-insensitive search in company name
@@ -193,9 +191,6 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
     const jobList = await Promise.all(
       jobListRaw
         .map(async job => {
-          const member = job.member_id 
-            ? await User.findById(job.member_id) 
-            : null;
           const job_role = job.job_role 
             ? await JobRole.findById(job.job_role) 
             : null;
@@ -212,10 +207,9 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
             _id: job._id,
             company_name: job?.companyDetails?.company_name || '',
             company_logo: job?.companyDetails?.logo || '',
+            company_address: job?.companyDetails?.address || '',
+            company_website: job?.companyDetails?.website || '',
             company: {value: job?.companyDetails?._id, label: job?.companyDetails?.company_name} || '',
-            jobIncentivesData: job?.jobIncentivesData || '',
-            retention: job?.jobIncentivesData?.retention ? job?.jobIncentivesData?.retention : "",
-            hirring_amount: job?.jobIncentivesData?.amount ? job?.jobIncentivesData?.amount?.toString() : '',
             job_role: job_role? {label: job_role?.name, value: job_role?._id} : '',
             title: job_role? {label: job_role?.name, value: job_role?._id} : '',
             status: job.status,
@@ -230,15 +224,11 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
               ? (await SkillMst.find({ _id: { $in: job.skill } }))
               .map(skill => ({ label: skill.name, value: skill._id }))
               : [],
-            member: member 
-              ? { label: member.name, value: member._id }
-              : '',
             min_exp: job.min_exp?.toString() || '',
             max_exp: job.max_exp?.toString() || '',
             vacancy: job.vacancy || '',
             min_ctc: job.min_ctc?.toString() || '',
             max_ctc: job.max_ctc?.toString() || '',
-            member_id: job.member_id?.toString() || '',
             job_desc: job.job_desc || '',
             mode_work: {label: job.mode_work, value: job.mode_work},
             industry_id: industry ? {label: industry.industry_name, value: industry._id} : '',
@@ -246,10 +236,7 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
             func_category_id: func_category ? {label: func_category.func_category_name, value: func_category._id} : '',
             age: job.age || '',
             notice_period: job.notice_period || '',
-            resume: job.resume || '',
             applied_url: job.applied_url || '',
-            audio_1: job.audio_1 || '',
-            audio_2: job.audio_2 || '',
             expired_date: formatDate(job.expired_date) || '',
             createdAt: formatDate(job.createdAt) || '',
             updatedAt: formatDate(job.updatedAt) || '',
@@ -325,39 +312,42 @@ exports.jobDetails = asyncErrorHandler(async (req, res, next) => {
 
     const jobDetails = {
       _id: jobListRaw._id,
-      company_name: companyDetails?.company_name || "",
-      company_logo: companyDetails?.logo || "",
-      company_address: companyDetails?.address || "",
-      company_website: companyDetails?.website || "",
-      job_no: jobListRaw.job_no || "",
-      job_role: jobRole?.name || "",
-      title: jobRole?.name || "",
-      job_desc: jobListRaw?.job_desc || "",
-      applied_url: jobListRaw?.applied_url || "",
-      status: jobListRaw.status === 0 ? "Inactive" : jobListRaw.status === 1 ? "Active" : "Deleted or Expired",
-      hunter_status: jobListRaw.hunter_status == 0 ? "Inactive" : "Active",
-      job_type: jobListRaw.job_type == 0 ? "Default" : jobListRaw.job_type == 1 ? "Trending" : "Hot",
-      position_close: jobListRaw.position_close == 0 ? "Open" : "Closed",
-      state: state?.state_name || "",
-      cities: cities.map((city) => ({ label: city.city_name, value: city._id })) || [],
-      skill: skills.map((skill) => ({ label: skill.name, value: skill._id })) || [],
-      member: member?.name || "",
-      min_exp: jobListRaw.min_exp?.toString() || "",
-      max_exp: jobListRaw.max_exp?.toString() || "",
-      vacancy: jobListRaw.vacancy || "",
-      min_ctc: jobListRaw.min_ctc?.toString() || "",
-      max_ctc: jobListRaw.max_ctc?.toString() || "",
-      mode_work: jobListRaw.mode_work || "",
-      industry_id: industry?.industry_name || "",
-      education: education?.name || "",
-      func_category: funcCategory?.func_category_name || "",
-      age: jobListRaw.age || "",
-      notice_period: jobListRaw.notice_period || "",
-      resume: jobListRaw.resume || "",
-      expired_date: jobListRaw.expired_date || "",
-      createdAt: jobListRaw.createdAt || "",
-      updatedAt: jobListRaw.updatedAt || "",
-      createdBy: createdBy?.name || "",
+      company_name: companyDetails?.company_name || '',
+      company_logo: companyDetails?.logo || '',
+      company_address: companyDetails?.address || '',
+      company_website:companyDetails?.website || '',
+      company: {value: companyDetails?._id, label: companyDetails?.company_name} || '',
+      job_role: jobRole? {label: jobRole?.name, value: jobRole?._id} : '',
+      title: jobRole? {label: jobRole?.name, value: jobRole?._id} : '',
+      status: jobListRaw.status,
+      hunter_status: jobListRaw.hunter_status,
+      job_type: jobListRaw.job_type,
+      position_close: jobListRaw.position_close,
+      cities: jobListRaw.city_id
+        ? (await Cities.find({ _id: { $in: jobListRaw.city_id } }))
+        .map(city => ({ label: city.city_name, value: city._id }))
+        : [],
+      skill: jobListRaw.skill
+        ? (await SkillMst.find({ _id: { $in: jobListRaw.skill } }))
+        .map(skill => ({ label: skill.name, value: skill._id }))
+        : [],
+      min_exp: jobListRaw.min_exp?.toString() || '',
+      max_exp: jobListRaw.max_exp?.toString() || '',
+      vacancy: jobListRaw.vacancy || '',
+      min_ctc: jobListRaw.min_ctc?.toString() || '',
+      max_ctc: jobListRaw.max_ctc?.toString() || '',
+      job_desc: jobListRaw.job_desc || '',
+      mode_work: {label: jobListRaw.mode_work, value: jobListRaw.mode_work},
+      industry_id: industry ? {label: industry.industry_name, value: industry._id} : '',
+      education: education ? {label: education.name, value: education._id} : '',
+      func_category_id: funcCategory ? {label: funcCategory.func_category_name, value: funcCategory._id} : '',
+      age: jobListRaw.age || '',
+      notice_period: jobListRaw.notice_period || '',
+      applied_url: jobListRaw.applied_url || '',
+      expired_date: formatDate(jobListRaw.expired_date) || '',
+      createdAt: formatDate(jobListRaw.createdAt) || '',
+      updatedAt: formatDate(jobListRaw.updatedAt) || '',
+      createdBy: (await User.findById(jobListRaw.createdBy))?.name,
     };
 
     return res.status(200).json({
