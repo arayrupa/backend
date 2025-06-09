@@ -32,6 +32,8 @@ app.use('/uploads', express.static(uploadsDir));
 
 const user = require('./routes/userRoute')
 const job = require('./routes/jobRoute')
+const cities = require('./routes/citiesRoute')
+const skills = require('./routes/skillsRoute')
 
 
 //Admin Routes
@@ -45,6 +47,8 @@ const job = require('./routes/jobRoute')
 //used for local system
 app.use('/api/v1', user)
 app.use('/api/v1', job)
+app.use('/api/v1', cities)
+app.use('/api/v1', skills)
 
 // //Admin apis
 // app.use('/api/v1', jobRole)

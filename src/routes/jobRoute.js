@@ -1,5 +1,5 @@
 const express = require('express');
-const { jobDetails, jobFilters, masterFilters, categoryFilters, createJob, updateJob, AdminJobListing, activeInactiveJob } = require('../controllers/jobController');
+const { jobDetails, jobFilters, masterFilters, categoryFilters, createJob, updateJob, AdminJobListing, activeInactiveJob, jobDropDown } = require('../controllers/jobController');
 const { isAuthenticatedUser, authorizeRoles } = require('../middlewares/user_actions/auth');
 const router = express.Router();
 const { uploadResume } = require('../middlewares/helpers/multer');
@@ -17,4 +17,5 @@ router.route('/update-job/:id')
     .put(uploadResume, isAuthenticatedUser, authorizeRoles(2,1), updateJob, handleMulterError)
 router.route('/admin_job_listing').post(AdminJobListing)
 router.route('/active-inactive-job/:id').post(isAuthenticatedUser, authorizeRoles(2,1), activeInactiveJob)
+router.route('/job_dropdown').post(jobDropDown) // List
 module.exports = router;

@@ -19,7 +19,7 @@ exports.createJob = asyncErrorHandler(async (req, res, next) => {
     const requiredFields = [
       "company", "applied_url","job_role", "edu_id", "vacancy", "min_exp", "max_exp",
       "min_ctc", "max_ctc", "age", "notice_period", "industry_id", "mode_work",
-      "func_category", "cities", "skill",
+      "func_category_id", "cities", "skill",
       "job_desc"
     ];
 
@@ -39,7 +39,6 @@ exports.createJob = asyncErrorHandler(async (req, res, next) => {
       resumeUrl = req.files.resume[0].path; // Use path instead of location
     }
 
-    console.log("resumeUrl",resumeUrl)
     // Construct Job Data
     const jobData = {
       ...req.body,
@@ -124,9 +123,33 @@ exports.updateJob = asyncErrorHandler(async (req, res, next) => {
 exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
   console.log("AdminJobListing API called");
   try {
-    const { type, mode_work, company, industry, jobRole, cities, min_salary, max_salary, trending, search, page=1, limit = 10 } = req.body.params;
-    // Calculate skip value for pagination
-    const skip = (page - 1) * limit;
+    const {
+      type,
+      mode_work,
+      company,
+      industry,
+      jobRole,
+      cities,
+      skills,
+      min_salary,
+      max_salary,
+      trending,
+      search,
+      page = 1,
+      limit = 10,
+    } = req.body.params;
+    const skip = (page - 1) * limit
+
+    const skillIds = Array.isArray(skills)
+      ? skills.map((id) => id.trim())
+      : typeof skills === "string"
+      ? skills.split(",").map((id) => id.trim())
+      : [];
+    const cityIds = Array.isArray(cities)
+      ? cities.map((id) => id.trim())
+      : typeof cities === "string"
+      ? cities.split(",").map((id) => id.trim())
+      : [];
 
     let matchStage = {status: { $in: [1] }}
     if(type){
@@ -140,15 +163,16 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
       mode_work &&  { "mode_work": { $eq: mode_work } },
       company && { "companyDetails._id": { $in: company.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
       industry && { "industry_id": { $in: industry.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
-      jobRole && { "job_role": { $in: jobRole.split(',').map(id => mongoose.Types.ObjectId(id.trim())) } },
-      cities && { "city_id": { $in: cities.split(',').map(id => id.trim()) } },
+      jobRole && { "job_role": { $in: jobRole.map(id => mongoose.Types.ObjectId(id.trim())) } },
+      cityIds.length > 0 && { "city_id": { $in: cityIds } },
+      skillIds.length > 0 && { "skill": { $in: skillIds } },
       trending && { "job_type": { $eq: parseFloat(trending) } },
       min_salary && { "min_ctc": { $gte: parsedMinSalary } },
       max_salary && { "max_ctc": { $lte: parsedMaxSalary } },
       search && {
         $or: [
-          { "companyDetails.company_name": { $regex: search, $options: "i" } }, // Case-insensitive search in company name
-          { "jobRoleData.name": { $regex: search, $options: "i" } } // Case-insensitive search in job title
+          { "companyDetails.company_name": { $regex: search, $options: "i" } },
+          { "jobRoleData.name": { $regex: search, $options: "i" } }
         ]
       },
     ].filter(Boolean);
@@ -180,6 +204,8 @@ exports.AdminJobListing = asyncErrorHandler(async (req, res, next) => {
       },
       ...filters.map(filter => ({ $match: filter })),
     ];
+
+    console.log("filters:", filters);
     // Fetch paginated candidate list
     const jobListRaw = await JobListing.aggregate([
       ...basePipeline,
@@ -385,7 +411,7 @@ exports.jobFilters = asyncErrorHandler(async (req, res, next) => {
       matchStage = assignedUser.length > 0 ? { member_id: { $in: assignedUser.map(user => mongoose.Types.ObjectId(user.assign_user_id._id.toString())) } } : {  }
     }
     // Fetch dropdown data
-    const [companyList, industriesList, jobRolesList, statesList, citiesList, rpaList, genderList, skillsList, functionsList, educationList, JobappliedStatusList, myTeamsListJob] = await Promise.all([
+    const [companyList, industriesList, jobRolesList, statesList, citiesList, rpaList, genderList, skillsList, functionsList, educationList] = await Promise.all([
       (async () => {
         const companyIds = await JobListing.distinct('user_id', { ...matchStage, user_id: { $ne: null } });
         const companies = await CompanyDetails.find({ user_id: { $in: companyIds } }).sort({ company_name: 1 }).lean();
@@ -423,17 +449,17 @@ exports.jobFilters = asyncErrorHandler(async (req, res, next) => {
         return rpas.map(rpa => ({ value: rpa?.retention, label: rpa?.retention + ` Days` }));
       })(),
       [{ value: 1, label: 'Male' }, { value: 2, label: 'Female' }, { value: 3, label: 'Other' }],
-      (async () => {
-        const skillIds = await JobListing.aggregate([
-          { $match: { ...matchStage } },
-          { $unwind: "$skill" },  // Flatten skill array
-          { $match: { skill: { $ne: null } } },  // Exclude null values
-          { $group: { _id: "$skill" } }  // Get distinct skill IDs
-        ]);
-        const skillObjectIds = skillIds.map(skill => skill._id);
-        const skillsList = await SkillMst.find({ _id: { $in: skillObjectIds }, status: 1 }).sort({ name: 1 }).lean();
-        return skillsList.map(skill => ({ value: skill._id, label: skill.name }));
-      })(),
+      // (async () => {
+      //   const skillIds = await JobListing.aggregate([
+      //     { $match: { ...matchStage } },
+      //     { $unwind: "$skill" },  // Flatten skill array
+      //     { $match: { skill: { $ne: null } } },  // Exclude null values
+      //     { $group: { _id: "$skill" } }  // Get distinct skill IDs
+      //   ]);
+      //   const skillObjectIds = skillIds.map(skill => skill._id);
+      //   const skillsList = await SkillMst.find({ _id: { $in: skillObjectIds }, status: 1 }).sort({ name: 1 }).lean();
+      //   return skillsList.map(skill => ({ value: skill._id, label: skill.name }));
+      // })(),
       (async () => {
         const funCategoryIds = await JobListing.distinct('func_category_id', { ...matchStage, func_category_id: { $ne: null } });
         const funCategorys = await FunctionCategory.find({ _id: { $in: funCategoryIds }, status: 1 }).sort({ func_category_name: 1 }).lean();
@@ -457,18 +483,18 @@ exports.jobFilters = asyncErrorHandler(async (req, res, next) => {
         cities: { count: citiesList.length, citiesList },
         rpa: { count: rpaList.length, rpaList },
         gender: { count: genderList.length, genderList },
-        skills: { count: skillsList.length, skillsList },
+        // skills: { count: skillsList.length, skillsList },
         functions: { count: functionsList.length, functionsList },
         education: { count: educationList.length, educationList },
       },
     });
   } catch (error) {
-    console.error("Error in candidateFilters:", error);
+    console.error("Error in candidateFilters:", error)
     return res.status(500).json({
       success: false,
       message: "There was an error in fetching job listings.",
       error: error.message || error,
-    });
+    })
   }
 });
 
@@ -477,7 +503,7 @@ exports.masterFilters = asyncErrorHandler(async (req, res, next) => {
   console.log("masterFilters API called");
   try {
     // Fetch dropdown data
-    const [companyList, industriesList, jobRolesList, statesList, citiesList, genderList, skillsList, functionsList, educationList, workModeList] = await Promise.all([
+    const [companyList, industriesList, jobRolesList, statesList, citiesList, genderList, functionsList, educationList, workModeList] = await Promise.all([
       CompanyDetails.find({ status: 1 }).sort({ company_name: 1 }).then(companies =>
         companies.map(company => ({ value: company._id, label: company.company_name }))
       ),
@@ -494,9 +520,7 @@ exports.masterFilters = asyncErrorHandler(async (req, res, next) => {
         cities.map(city => ({ value: city._id, label: city.city_name }))
       ),
       [{ value: 1, label: 'Male' }, { value: 2, label: 'Female' }, { value: 3, label: 'Other' }],
-      SkillMst.find({ status: 1 }).sort({ name: 1 }).then(skills =>
-        skills.map(skill => ({ value: skill._id, label: skill.name }))
-      ),
+
       FunctionCategory.find({ status: 1 }).sort({ func_category_name: 1 }).then(functions =>
         functions.map(functions => ({ value: functions._id, label: functions.func_category_name }))
       ),
@@ -516,10 +540,9 @@ exports.masterFilters = asyncErrorHandler(async (req, res, next) => {
         state: { count: statesList.length, statesList },
         cities: { count: citiesList.length, citiesList },
         gender: { count: genderList.length, genderList },
-        skills: { count: skillsList.length, skillsList },
         func_categories: { count: functionsList.length, functionsList },
         educations: { count: educationList.length, educationList },
-        work_mode: { count: workModeList.length, workModeList },
+        work_mode: { count: workModeList.length, workModeList }
       },
     });
   } catch (error) {
@@ -602,3 +625,32 @@ exports.activeInactiveJob = asyncErrorHandler(async (req, res, next) => {
         });
     }
 });
+
+// jobDropDown api
+exports.jobDropDown = asyncErrorHandler(async (req, res) => {
+  console.log("jobDropDown API called");
+  try {
+    const { search } = req.body;
+    const jobRoles = await JobRole.find({ status: 1, search, $options: "i" } ).limit(10).sort({ name: 1 }).then(jobRoles =>
+      jobRoles.map(jobRole => ({ value: jobRole._id, label: jobRole.name }))
+    )
+    const jobdata = await JobListing.findOne({job_role:jobRoles?.value})
+    if (!jobdata) {
+      return res.status(500).json({
+        success: false,
+        message: "Job not found"
+      })
+    }
+    return res.status(200).json({
+      success: true,
+      message: 'job dropdown fetched successfully',
+      jobs: jobdata
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "There was an error in jobDropDown.",
+      error: error.message || error,
+    })
+  }
+})
