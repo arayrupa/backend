@@ -1,9 +1,5 @@
 # dependencies
 /node_modules
 # Ignore environment files
-.env
-.env.copy
-env
-/env
 # yarn lock file
 yarn.lock
