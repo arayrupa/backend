@@ -1,6 +1,8 @@
 const asyncErrorHandler = require("../middlewares/helpers/asyncErrorHandler")
 const { SkillMst } = require('../models/skillMstModel')
 const { formatDate } = require("../middlewares/helpers/formatDate")
+const nodemailer = require("nodemailer")
+
 // const { redisClient, setAsync, getAsync } = require("../config/redisConfig")
 
 // Create Skill
@@ -366,3 +368,58 @@ exports.skillDropDown = asyncErrorHandler(async (req, res) => {
     });
   }
 })
+
+//Email from Contact page
+exports.email = asyncErrorHandler( async (req, res) => {
+  const { name, email, subject, message } = req.body;
+ console.log(req.body)
+  if (!name || !email || !subject || !message) {
+    return res.status(400).json({ success: false, msg: "All fields are required" });
+  }
+
+  try {
+    // Create transporter
+  
+   let transporter = nodemailer.createTransport({
+      service: "gmail", // or use "smtp.mailtrap.io" for testing
+      auth: {
+        user:  "cheggindia78@gmail.com", // replace with your email
+        pass: process.env.HOISTINGER_EMAIL_PASS,   // use App Password (not normal password)
+      },
+    });
+
+    // Email content
+    let mailOptions = {
+      from: `"${name}" <${email}>`,
+      to: "cheggindia78@gmail.com", // replace with the email where you want to receive messages
+      subject: subject,
+      text: `
+        You received a new message from the contact form:
+
+        Name: ${name}
+        Email: ${email}
+        Subject: ${subject}
+        Message: ${message}
+      `,
+      html: `
+        <h3>New Contact Form Submission</h3>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Subject:</strong> ${subject}</p>
+        <p><strong>Message:</strong> ${message}</p>
+      `,
+    };
+
+    // Send email
+    await transporter.sendMail(mailOptions);
+
+    res.json({ success: true, msg: "Message sent successfully!" });
+  } catch (error) {
+    console.error(error)
+     return res.status(500).json({
+      success: false,
+      message: "There was an error in email section.",
+      error: error.message || error,
+    });
+  }
+});
