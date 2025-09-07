@@ -34,6 +34,7 @@ const user = require('./routes/userRoute')
 const job = require('./routes/jobRoute')
 const cities = require('./routes/citiesRoute')
 const skills = require('./routes/skillsRoute')
+const blogs = require('./routes/blogRoute')
 
 
 //Admin Routes
@@ -49,6 +50,7 @@ app.use('/api/v1', user)
 app.use('/api/v1', job)
 app.use('/api/v1', cities)
 app.use('/api/v1', skills)
+app.use('/api/v1/blog', blogs)
 
 // //Admin apis
 // app.use('/api/v1', jobRole)
