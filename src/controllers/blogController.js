@@ -1,29 +1,26 @@
-import Post from "../models/blogModel.js"; 
+const { Post } = require("../models/blogModel");
 
+// simple error handler utility
+const errorHandler = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
 
-export const create = async (req, res, next) => {
-  // if (!req.user.isAdmin) {
-  //   return next(errorHandler(403, "You are not allowed to create a post"));
-  // }
-  // if (!req.body.title || !req.body.content) {
-  //   return next(errorHandler(400, "Please provide all required fileds"));
-  // }
-  console.log(req.user)
-  console.log(req.body)
-
-  const slug = req.body.title
-    .split(" ")
-    .join("-")
-    .toLowerCase()
-    .replace(/[^a-zA-Z0-9-]/g, "");
-
-  const newPost = new Post({
-    ...req.body,
-    slug,
-    userId: req.user.user_id,
-  });
-
+exports.createBlogs = async (req, res, next) => {
   try {
+    const slug = req.body.title
+      .split(" ")
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-zA-Z0-9-]/g, "");
+
+    const newPost = new Post({
+      ...req.body,
+      slug,
+      userId: req.user.id,
+    });
+
     const savedPost = await newPost.save();
     res.status(201).json(savedPost);
   } catch (error) {
@@ -31,11 +28,12 @@ export const create = async (req, res, next) => {
   }
 };
 
-export const getposts = async (req, res, next) => {
+exports.listBlogs = async (req, res, next) => {
   try {
     const startIndex = parseInt(req.query.startIndex) || 0;
     const limit = parseInt(req.query.limit) || 9;
     const sortDirection = req.query.order === "asc" ? 1 : -1;
+
     const posts = await Post.find({
       ...(req.query.userId && { userId: req.query.userId }),
       ...(req.query.category && { category: req.query.category }),
@@ -55,7 +53,6 @@ export const getposts = async (req, res, next) => {
     const totalPosts = await Post.countDocuments();
 
     const now = new Date();
-
     const oneMonthAgo = new Date(
       now.getFullYear(),
       now.getMonth() - 1,
@@ -76,21 +73,22 @@ export const getposts = async (req, res, next) => {
   }
 };
 
-export const deletePost = async (req, res, next) => {
-  if (!req.user.isAdmin || req.user.id != req.params.userId) {
-    return next(errorHandler(403, "You are not allwed to delete this post"));
-  }
+exports.getBlogs = async (req, res, next) => {
+  // Get a single blog by ID
   try {
-    await Post.findByIdAndDelete(req.params.postId);
-    res.status(200).json("The post has been deleted");
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: "Blog not found" });
+    }
+    res.status(200).json(post);
   } catch (error) {
     next(error);
   }
 };
 
-export const updatePost = async (req, res, next) => {
-  if (!req.user.isAdmin || req.user.id != req.params.userId) {
-    return next(errorHandler(403, "You are not allwed to delete this post"));
+exports.updateBlogs = async (req, res, next) => {
+  if (!req.user.isAdmin && req.user.id !== req.params.userId) {
+    return next(errorHandler(403, "You are not allowed to update this post"));
   }
   try {
     const updatedPost = await Post.findByIdAndUpdate(
@@ -107,6 +105,35 @@ export const updatePost = async (req, res, next) => {
     );
 
     res.status(200).json(updatedPost);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateStatus = async (req, res, next) => {
+  // Implement status update logic or stub
+  try {
+    const post = await Post.findByIdAndUpdate(
+      req.params.id,
+      { status: req.body.status },
+      { new: true }
+    );
+    if (!post) {
+      return res.status(404).json({ message: "Blog not found" });
+    }
+    res.status(200).json(post);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.deleteBlogs = async (req, res, next) => {
+  if (!req.user.isAdmin && req.user.id !== req.params.userId) {
+    return next(errorHandler(403, "You are not allowed to delete this post"));
+  }
+  try {
+    await Post.findByIdAndDelete(req.params.id);
+    res.status(200).json({ message: "The post has been deleted" });
   } catch (error) {
     next(error);
   }

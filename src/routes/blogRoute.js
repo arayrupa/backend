@@ -1,19 +1,33 @@
-const express = require("express");
-const { create, deletePost, updatePost, getposts } = require("../controllers/blogController");
-const { isAuthenticatedUser } = require("../middlewares/user_actions/auth");
+const express = require('express');
+const {
+  createBlogs,
+  updateBlogs,
+  listBlogs,
+  getBlogs,
+  updateStatus,
+  deleteBlogs,
+} = require('../controllers/blogController');
+const { isAuthenticatedUser, authorizeRoles } = require('../middlewares/user_actions/auth');
 
 const router = express.Router();
 
-// Create Post
-router.route("/create").post(isAuthenticatedUser, create);
+// Create Blog
+router.route('/create-blogs').post(isAuthenticatedUser, authorizeRoles(1), createBlogs);
 
-// Get Posts
-router.route("/getblogs").get(getposts);
+// Update Blog
+router.route('/blogs/:id').put(isAuthenticatedUser, authorizeRoles(2), updateBlogs);
 
-// Delete Post
-router.route("/deletepost/:postId/:userId").delete(isAuthenticatedUser, deletePost);
+// List Blogs (public access)
+router.route('/blogs').post(listBlogs);
+router.route('/blog/list').get(listBlogs);
 
-// Update Post
-router.route("/updatepost/:postId/:userId").put(isAuthenticatedUser, updatePost);
+// Get Blog by ID (public access)
+router.route('/blogs/:id').get(getBlogs);
+
+// Update Status of Blog
+router.route('/blogs/:id/status').patch(isAuthenticatedUser, authorizeRoles(2), updateStatus);
+
+// Delete Blog
+router.route('/blogs/:id').delete(isAuthenticatedUser, authorizeRoles(2), deleteBlogs);
 
 module.exports = router;
