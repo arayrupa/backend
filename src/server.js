@@ -44,7 +44,7 @@ mongoose.set('strictQuery', true);
 // Middleware
 app.use(express.json());
 app.use(cors({
-  origin: "https://frontend-five-flame-38.vercel.app",  // Your exact Vercel URL
+  origin: "https://frontend-w7jm.vercel.app/",  // Your exact Vercel URL
   credentials: true
 }));
 
