@@ -1,34 +1,32 @@
-/**
-    * @description      : 
-    * @author           : admin
-    * @group            : 
-    * @created          : 29/09/2023 - 14:55:06
-    * 
-    * MODIFICATION LOG
-    * - Version         : 1.0.0
-    * - Date            : 29/09/2023
-    * - Author          : admin
-    * - Modification    : 
-**/
-const app = require('./app');
-const connectDatabase = require('./config/database');
+const app = require('./app'); // Make sure app.js exists
+const connectDatabase = require('./config/database'); // Make sure database.js exists
+
 const PORT = process.env.PORT || 4003;
-// UncaughtException Error
+
+// Handle synchronous errors
 process.on('uncaughtException', (err) => {
-    console.log(`Error: ${err.message}`);
+    console.error(`Uncaught Exception: ${err.message}`);
+    console.error(err.stack);
     process.exit(1);
 });
 
-connectDatabase();
-
-const server = app.listen(PORT, () => {
-    console.log(`Server running `+PORT)
-});
-
-// Unhandled Promise Rejection
-process.on('unhandledRejection', (err) => {
-    console.log(`Errord: ${err.message}`);
-    server.close(() => {
+// Connect to MongoDB
+connectDatabase()
+    .then(() => console.log('MongoDB Connected'))
+    .catch((err) => {
+        console.error(`MongoDB connection error: ${err.message}`);
         process.exit(1);
     });
+
+// Start server
+const server = app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
+
+// Handle asynchronous errors
+process.on('unhandledRejection', (err) => {
+    console.error(`Unhandled Rejection: ${err.message}`);
+    console.error(err.stack);
+    server.close(() => process.exit(1));
+});
+
